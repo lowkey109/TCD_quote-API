@@ -122,3 +122,29 @@ def create_quote(req: QuoteRequest, x_api_key: Optional[str] = Header(None)):
             "If a SKU is REVIEW_REQUIRED, staff must confirm price before quoting."
         ]
     }
+import os
+from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks
+import httpx
+
+app = FastAPI()
+
+def require_api_key(x_api_key: str | None):
+    expected = os.getenv("TCD_API_KEY")
+    if not expected:
+        # If you forgot to set it in Render, fail closed
+        raise HTTPException(status_code=500, detail="Server missing TCD_API_KEY")
+    if x_api_key != expected:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+@app.middleware("http")
+async def api_key_middleware(request: Request, call_next):
+    # Allow docs + openapi without a key (so you can view Swagger)
+    public_paths = {"/docs", "/openapi.json", "/redoc"}
+    if request.url.path in public_paths:
+        return await call_next(request)
+
+    # Everything else requires the key
+    x_api_key = request.headers.get("x-api-key")
+    require_api_key(x_api_key)
+
+    return await call_next(request)
