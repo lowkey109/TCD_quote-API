@@ -1,7 +1,7 @@
 import os
 import math
 import pandas as pd
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import List, Optional
 
@@ -55,7 +55,7 @@ def search_products(q: str, x_api_key: Optional[str] = Header(None)):
         return {"results": []}
 
     mask = df["sku"].str.lower().str.contains(q2, na=False) | df["name"].astype(str).str.lower().str.contains(q2, na=False)
-    out = df[mask].head(20)[["sku","category","name","unit_price_ex_gst","currency","status","review_reason"]].fillna("").to_dict("records")
+    out = df[mask].head(20)[["sku","category","name","unit_price_ex_gst","currency","status","review_reason"]].fillna("$").to_dict("records")
     return {"results": out}
 
 @app.get("/products/{sku}", summary="Get a product by SKU")
@@ -65,7 +65,7 @@ def get_product(sku: str, x_api_key: Optional[str] = Header(None)):
     row = df[df["sku"].str.lower() == sku.strip().lower()]
     if row.empty:
         raise HTTPException(status_code=404, detail="SKU not found")
-    r = row.iloc[0].fillna("").to_dict()
+    r = row.iloc[0].fillna("$").to_dict()
     return r
 
 @app.post("/quote", summary="Create a quote from SKU + quantity")
@@ -122,29 +122,14 @@ def create_quote(req: QuoteRequest, x_api_key: Optional[str] = Header(None)):
             "If a SKU is REVIEW_REQUIRED, staff must confirm price before quoting."
         ]
     }
-import os
-from fastapi import FastAPI, Header, HTTPException, Request, BackgroundTasks
-import httpx
 
-app = FastAPI()
-
-def require_api_key(x_api_key: str | None):
-    expected = os.getenv("TCD_API_KEY")
-    if not expected:
-        # If you forgot to set it in Render, fail closed
-        raise HTTPException(status_code=500, detail="Server missing TCD_API_KEY")
-    if x_api_key != expected:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
+# Middleware: require API key for all non-public paths
 @app.middleware("http")
 async def api_key_middleware(request: Request, call_next):
-    # Allow docs + openapi without a key (so you can view Swagger)
-    public_paths = {"/docs", "/openapi.json", "/redoc"}
-    if request.url.path in public_paths:
+    # allow docs/openapi/redoc and related static paths
+    if request.url.path.startswith(("/docs", "/openapi.json", "/redoc", "/docs/oauth2-redirect", "/static")):
         return await call_next(request)
 
-    # Everything else requires the key
     x_api_key = request.headers.get("x-api-key")
-    require_api_key(x_api_key)
-
+    require_key(x_api_key)
     return await call_next(request)
